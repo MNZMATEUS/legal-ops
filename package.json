@@ -1,0 +1,16 @@
+{
+  "name": "backend-api",
+  "version": "1.0.0",
+  "description": "API Backend para Sistema",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1",
+    "axios": "^1.6.2"
+  }
+}

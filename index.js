@@ -1,141 +1,177 @@
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
-const axios = require('axios'); // Importante: certifique-se que instalou (npm install axios)
+const axios = require('axios');
+const { v4: uuidv4 } = require('uuid'); // Para gerar o ID do lote (batch)
+// Se der erro de 'uuid', rode: npm install uuid
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Variáveis de Ambiente
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
-const INFOSIMPLES_TOKEN = process.env.INFOSIMPLES_TOKEN; // Novo Token
+// --- CONFIGURAÇÕES ---
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const TOKEN_API = process.env.INFOSIMPLES_TOKEN;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Mapeamento das APIs (Configuração Central)
+const FONTES_CONFIG = {
+    'trt4': {
+        url: 'https://api.infosimples.com/api/v2/consultas/tribunal/trt4/ceat',
+        precisa_nome: false,
+        aceita: ['CPF', 'CNPJ']
+    },
+    'policia_federal': {
+        url: 'https://api.infosimples.com/api/v2/consultas/antecedentes-criminais/pf/emit',
+        precisa_nome: true, // PF exige nome e data nascimento
+        aceita: ['CPF']
+    },
+    'receita_federal': {
+        url: 'https://api.infosimples.com/api/v2/consultas/receita-federal/cnpj',
+        precisa_nome: false,
+        aceita: ['CNPJ']
+    }
+};
 
-app.get('/', (req, res) => {
-    res.send('API InfoSimples Gateway Online!');
-});
+app.get('/', (req, res) => res.send('API Background Check Online'));
 
-app.post('/consultar-trt4', async (req, res) => {
-    try {
-        console.log('1. Recebi pedido de consulta...');
+app.post('/consultar-lote', async (req, res) => {
+    const { documento, nome, data_nascimento, fontes_escolhidas } = req.body;
+    const batchId = uuidv4(); // Identificador único deste grupo de consultas
+
+    console.log(`>>> Iniciando Batch ${batchId} para: ${documento}`);
+
+    if (!documento || !fontes_escolhidas || fontes_escolhidas.length === 0) {
+        return res.status(400).json({ erro: "Documento e fontes são obrigatórios." });
+    }
+
+    // Limpeza e Validação
+    const docLimpo = documento.replace(/\D/g, '');
+    const tipoDoc = docLimpo.length > 11 ? 'CNPJ' : 'CPF';
+
+    // Array de Promessas (Consultas que rodarão em paralelo)
+    const promessas = fontes_escolhidas.map(async (fonteKey) => {
+        const config = FONTES_CONFIG[fonteKey];
         
-        // 1. Receber e Limpar o Input (CPF ou CNPJ)
-        // O frontend vai mandar { "documento": "123.456..." }
-        const docBruto = req.body.documento;
-        if (!docBruto) throw new Error("Documento (CPF/CNPJ) é obrigatório.");
+        // 1. Validação Prévia (Pular se o tipo não bate)
+        if (!config) return null; // Fonte não existe
+        if (!config.aceita.includes(tipoDoc)) {
+            return {
+                origem: fonteKey,
+                status: 'IGNORADO',
+                mensagem: `Esta fonte não aceita ${tipoDoc}`
+            };
+        }
+        if (config.precisa_nome && (!nome || !data_nascimento)) {
+             return {
+                origem: fonteKey,
+                status: 'ERRO_DADOS',
+                mensagem: `Nome e Data de Nascimento são obrigatórios para ${fonteKey}`
+            };
+        }
 
-        // Remove tudo que não for número (pontos, traços)
-        const docLimpo = docBruto.replace(/\D/g, '');
-        
-        // Decide se é CPF ou CNPJ baseado no tamanho
-        const isCnpj = docLimpo.length > 11;
-        
-        console.log(`2. Documento identificado: ${isCnpj ? 'CNPJ' : 'CPF'} - ${docLimpo}`);
-
-        // 2. Montar Payload para InfoSimples
+        // 2. Montar Argumentos da API
         const args = {
-            token: INFOSIMPLES_TOKEN,
-            timeout: 300, // Timeout sugerido pela doc
-            [isCnpj ? 'cnpj' : 'cpf']: docLimpo // Chave dinâmica
+            token: TOKEN_API,
+            timeout: 600
         };
 
-        // 3. Chamar a API da InfoSimples
-        console.log('3. Chamando InfoSimples...');
-        const responseExterna = await axios.post(
-            'https://api.infosimples.com/api/v2/consultas/tribunal/trt4/ceat', 
-            args
-        );
-        const resInfo = responseExterna.data;
-
-        // 4. Verificar se deu erro na InfoSimples (Ex: 600-799)
-        if (resInfo.code !== 200) {
-            console.error('Erro na InfoSimples:', resInfo.code_message);
-            // Retorna o erro para o frontend mas não salva arquivo
-            return res.status(400).json({
-                sucesso: false,
-                mensagem: `Erro na consulta: ${resInfo.code} - ${resInfo.code_message}`,
-                erros_detalhados: resInfo.errors
-            });
-        }
-
-        // 5. O Pulo do Gato: Baixar o arquivo da URL que a API devolveu
-        // A API devolve um array de links em 'site_receipts'
-        let urlArquivoSupabase = null;
-
-        if (resInfo.site_receipts && resInfo.site_receipts.length > 0) {
-            const urlReciboOriginal = resInfo.site_receipts[0];
-            console.log('4. Baixando arquivo original de:', urlReciboOriginal);
-
-            // Baixa o arquivo para a memória do Render
-            const fileResponse = await axios.get(urlReciboOriginal, { responseType: 'arraybuffer' });
-            
-            // Define nome e extensão (PDF ou HTML)
-            // Tenta adivinhar pelo link, se não der, assume PDF
-            const extensao = urlReciboOriginal.endsWith('.html') ? 'html' : 'pdf';
-            const contentType = extensao === 'html' ? 'text/html' : 'application/pdf';
-            const nomeArquivo = `certidao_${docLimpo}_${Date.now()}.${extensao}`;
-
-            console.log('5. Fazendo upload para o Supabase...');
-            
-            // Upload para o Bucket
-            const { error: uploadError } = await supabase
-                .storage
-                .from('arquivos-teste') // Certifique-se que este bucket existe e é publico
-                .upload(nomeArquivo, fileResponse.data, { contentType: contentType });
-
-            if (uploadError) throw uploadError;
-
-            // Gerar URL Pública do Supabase
-            const { data: urlData } = supabase
-                .storage
-                .from('arquivos-teste')
-                .getPublicUrl(nomeArquivo);
-            
-            urlArquivoSupabase = urlData.publicUrl;
-        }
-
-      // 6. Salvar TUDO no Banco de Dados
-        console.log('6. Gravando no Banco...');
+        // Adicionar parâmetros específicos
+        if (tipoDoc === 'CNPJ') args.cnpj = docLimpo;
+        if (tipoDoc === 'CPF') args.cpf = docLimpo;
         
-        const { data: dbData, error: dbError } = await supabase
-            .from('consultas_trt4') // Nome novo da tabela
-            .insert([{
-                // Coluna nova: qual CPF/CNPJ foi usado
-                documento_pesquisado: docLimpo, 
-                
-                // Coluna renomeada: O JSON inteiro da InfoSimples vai aqui
-                resposta_completa_api: resInfo, 
-                
-                // Coluna antiga: O link do seu arquivo
-                url_arquivo: urlArquivoSupabase, 
-                
-                // Coluna nova: status (ex: "A requisição foi processada com sucesso.")
-                status_resumido: resInfo.code_message 
-            }])
-            .select();
+        if (fonteKey === 'policia_federal') {
+            args.nome = nome;
+            args.birthdate = data_nascimento; // Formato YYYY-MM-DD (já vem do front)
+            // args.nome_mae = ... (opcional, não vamos usar no MVP)
+        } else if (fonteKey === 'trt4' && tipoDoc === 'CPF') {
+            // O TRT4 as vezes pede nome se for CPF, vamos mandar por garantia
+             args.nome = nome; 
+        }
 
-        if (dbError) throw dbError;
+        try {
+            // 3. Chamar InfoSimples
+            console.log(`[${fonteKey}] Chamando API...`);
+            const response = await axios.post(config.url, args);
+            const resInfo = response.data;
 
-        // 7. Resposta Final para o Frontend
-        res.json({
-            sucesso: true,
-            mensagem: "Consulta realizada com sucesso!",
-            dados_certidao: resInfo.data,
-            arquivo: urlArquivoSupabase
-        });
+            if (resInfo.code !== 200) {
+                throw new Error(`API retornou código ${resInfo.code}: ${resInfo.code_message}`);
+            }
 
-    } catch (error) {
-        console.error('ERRO CRÍTICO:', error.message);
-        // Tenta pegar mensagem de erro do Axios se existir
-        const msg = error.response?.data?.code_message || error.message;
-        res.status(500).json({ erro: msg });
-    }
+            // 4. Download do Arquivo (Se houver)
+            let urlSupabase = null;
+            if (resInfo.site_receipts && resInfo.site_receipts.length > 0 && resInfo.site_receipts[0]) {
+                try {
+                    const urlOriginal = resInfo.site_receipts[0];
+                    const fileBuffer = await axios.get(urlOriginal, { responseType: 'arraybuffer' });
+                    
+                    const extensao = urlOriginal.endsWith('.html') ? 'html' : 'pdf';
+                    const contentType = extensao === 'html' ? 'text/html' : 'application/pdf';
+                    const nomeArquivo = `${batchId}/${fonteKey}_${Date.now()}.${extensao}`;
+
+                    const { error: upErr } = await supabase.storage
+                        .from('arquivos-teste')
+                        .upload(nomeArquivo, fileBuffer.data, { contentType });
+                    
+                    if (!upErr) {
+                        const { data: urlData } = supabase.storage
+                            .from('arquivos-teste')
+                            .getPublicUrl(nomeArquivo);
+                        urlSupabase = urlData.publicUrl;
+                    }
+                } catch (e) {
+                    console.error(`[${fonteKey}] Erro ao baixar arquivo:`, e.message);
+                }
+            }
+
+            // 5. Salvar no Supabase (Tabela Geral)
+            await supabase.from('certidoes_emitidas').insert([{
+                batch_id: batchId,
+                origem: fonteKey,
+                documento_pesquisado: docLimpo,
+                nome_pesquisado: nome || null,
+                resposta_completa_api: resInfo,
+                url_arquivo: urlSupabase,
+                status_resumido: 'SUCESSO'
+            }]);
+
+            return {
+                origem: fonteKey,
+                status: 'SUCESSO',
+                arquivo: urlSupabase,
+                dados: resInfo.data
+            };
+
+        } catch (error) {
+            console.error(`[${fonteKey}] Falha:`, error.message);
+            // Salvar o erro no banco também para auditoria
+            await supabase.from('certidoes_emitidas').insert([{
+                batch_id: batchId,
+                origem: fonteKey,
+                documento_pesquisado: docLimpo,
+                status_resumido: 'ERRO',
+                resposta_completa_api: { erro: error.message }
+            }]);
+
+            return {
+                origem: fonteKey,
+                status: 'ERRO',
+                mensagem: error.message
+            };
+        }
+    });
+
+    // Espera todas as consultas terminarem
+    const resultados = await Promise.all(promessas);
+
+    // Remove nulos (ignorar fontes não executadas)
+    const resultadosFinais = resultados.filter(r => r !== null);
+
+    res.json({
+        batch_id: batchId,
+        resultados: resultadosFinais
+    });
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-});
+app.listen(PORT, () => { console.log(`Rodando na porta ${PORT}`); });

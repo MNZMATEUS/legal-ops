@@ -12,7 +12,6 @@ app.use(express.json());
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const TOKEN_API = process.env.INFOSIMPLES_TOKEN;
 
-// Mapeamento das APIs
 const FONTES_CONFIG = {
     'trt4': {
         url: 'https://api.infosimples.com/api/v2/consultas/tribunal/trt4/ceat',
@@ -31,33 +30,37 @@ const FONTES_CONFIG = {
     }
 };
 
-app.get('/', (req, res) => res.send('API Background Check Online v3 (Smart Detect)'));
+app.get('/', (req, res) => res.send('API Background Check v5 (Mother Name Added)'));
 
 app.post('/consultar-lote', async (req, res) => {
-    const { documento, nome, data_nascimento, fontes_escolhidas } = req.body;
+    // 1. Recebendo nome_mae do Frontend
+    const { documento, nome, data_nascimento, nome_mae, fontes_escolhidas } = req.body;
     const batchId = uuidv4();
 
-    console.log(`>>> Batch ${batchId}: Iniciando para ${documento}`);
+    console.log(`>>> Batch ${batchId}: Iniciando...`);
 
-    if (!documento || !fontes_escolhidas || fontes_escolhidas.length === 0) {
-        return res.status(400).json({ erro: "Documento e fontes são obrigatórios." });
+    if (!documento || !fontes_escolhidas) {
+        return res.status(400).json({ erro: "Dados incompletos." });
     }
 
-    // 1. Limpeza de Dados
     const docLimpo = documento.replace(/\D/g, '');
     const tipoDoc = docLimpo.length > 11 ? 'CNPJ' : 'CPF';
     const nomeLimpo = nome ? nome.trim().toUpperCase() : null;
     const dataNascimentoLimpa = data_nascimento ? data_nascimento.trim() : null;
+    
+    // 2. Limpando Nome da Mãe (Maiúsculo e sem espaços nas pontas)
+    const nomeMaeLimpo = nome_mae ? nome_mae.trim().toUpperCase() : null;
 
     const promessas = fontes_escolhidas.map(async (fonteKey) => {
         const config = FONTES_CONFIG[fonteKey];
         
-        if (!config) return null;
-        if (!config.aceita.includes(tipoDoc)) {
-            return { origem: fonteKey, status: 'IGNORADO', mensagem: `Fonte não aceita ${tipoDoc}` };
+        if (!config || !config.aceita.includes(tipoDoc)) {
+            return { origem: fonteKey, status: 'IGNORADO' };
         }
+        
+        // Validação de campos obrigatórios básicos
         if (config.precisa_nome && (!nomeLimpo || !dataNascimentoLimpa)) {
-             return { origem: fonteKey, status: 'ERRO_DADOS', mensagem: `Nome e Data obrigatórios` };
+             return { origem: fonteKey, status: 'ERRO_DADOS', mensagem: 'Dados pessoais (Nome/Data) faltantes' };
         }
 
         const args = { token: TOKEN_API, timeout: 600 };
@@ -66,55 +69,50 @@ app.post('/consultar-lote', async (req, res) => {
         
         if (fonteKey === 'policia_federal') {
             args.nome = nomeLimpo;
-            args.birthdate = dataNascimentoLimpa; 
+            args.birthdate = dataNascimentoLimpa;
+            
+            // 3. Adicionando Nome da Mãe se estiver disponível
+            if (nomeMaeLimpo) {
+                args.nome_mae = nomeMaeLimpo;
+            }
         } else if (fonteKey === 'trt4' && tipoDoc === 'CPF') {
              args.nome = nomeLimpo; 
         }
 
         try {
-            console.log(`[${fonteKey}] Solicitando API...`);
+            console.log(`[${fonteKey}] Chamando API...`);
             const response = await axios.post(config.url, args);
             const resInfo = response.data;
 
-            if (resInfo.code !== 200) {
-                throw new Error(`Erro ${resInfo.code}: ${resInfo.code_message}`);
-            }
+            if (resInfo.code !== 200) throw new Error(resInfo.code_message);
 
-            // --- LÓGICA DE DOWNLOAD CORRIGIDA ---
+            // --- LÓGICA DE DETECÇÃO DE ARQUIVO ---
             let urlSupabase = null;
             if (resInfo.site_receipts && resInfo.site_receipts.length > 0) {
                 try {
                     const urlOriginal = resInfo.site_receipts[0];
-                    console.log(`[${fonteKey}] Baixando arquivo...`);
-
-                    // Baixa o arquivo
                     const fileResponse = await axios.get(urlOriginal, { responseType: 'arraybuffer' });
                     const fileBuffer = fileResponse.data;
                     
-                    // DETECÇÃO INTELIGENTE: Converte o início do arquivo para texto para checar
-                    const inicioArquivo = fileBuffer.toString('utf-8', 0, 50).toLowerCase(); // Lê os primeiros 50 caracteres
+                    const headerArquivo = fileBuffer.toString('utf-8', 0, 1000).toLowerCase();
                     
                     let extensao = 'pdf';
                     let contentType = 'application/pdf';
 
-                    // Se começar com <html ou <!doctype, é HTML com certeza
-                    if (inicioArquivo.includes('<html') || inicioArquivo.includes('<!doctype')) {
+                    if (headerArquivo.startsWith('%pdf-')) {
+                        // É PDF
+                    } else if (headerArquivo.includes('<html') || headerArquivo.includes('<!doctype') || headerArquivo.includes('<body') || headerArquivo.includes('<meta')) {
                         extensao = 'html';
-                        contentType = 'text/html; charset=utf-8'; // charset é vital para acentos
-                        console.log(`[${fonteKey}] Arquivo identificado como HTML.`);
+                        contentType = 'text/html; charset=utf-8';
                     } else {
-                        console.log(`[${fonteKey}] Arquivo identificado como PDF (Padrão).`);
+                        extensao = 'html'; // Fallback
+                        contentType = 'text/html; charset=utf-8';
                     }
 
                     const nomeArquivo = `${batchId}/${fonteKey}_${Date.now()}.${extensao}`;
-
-                    // Upload para Supabase
                     const { error: upErr } = await supabase.storage
                         .from('arquivos-teste')
-                        .upload(nomeArquivo, fileBuffer, { 
-                            contentType: contentType, 
-                            upsert: true
-                        });
+                        .upload(nomeArquivo, fileBuffer, { contentType: contentType, upsert: true });
                     
                     if (!upErr) {
                         const { data: urlData } = supabase.storage
@@ -123,10 +121,9 @@ app.post('/consultar-lote', async (req, res) => {
                         urlSupabase = urlData.publicUrl;
                     }
                 } catch (e) {
-                    console.error(`[${fonteKey}] Erro no arquivo:`, e.message);
+                    console.error(`[${fonteKey}] Erro download:`, e.message);
                 }
             }
-            // ------------------------------------
 
             await supabase.from('certidoes_emitidas').insert([{
                 batch_id: batchId,
@@ -138,12 +135,7 @@ app.post('/consultar-lote', async (req, res) => {
                 status_resumido: 'SUCESSO'
             }]);
 
-            return {
-                origem: fonteKey,
-                status: 'SUCESSO',
-                arquivo: urlSupabase,
-                dados: resInfo.data
-            };
+            return { origem: fonteKey, status: 'SUCESSO', arquivo: urlSupabase, dados: resInfo.data };
 
         } catch (error) {
             const errorMsg = error.response?.data?.code_message || error.message;
@@ -159,9 +151,7 @@ app.post('/consultar-lote', async (req, res) => {
     });
 
     const resultados = await Promise.all(promessas);
-    const resultadosFinais = resultados.filter(r => r !== null);
-
-    res.json({ batch_id: batchId, resultados: resultadosFinais });
+    res.json({ batch_id: batchId, resultados: resultados.filter(r => r) });
 });
 
 const PORT = process.env.PORT || 3000;

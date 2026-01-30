@@ -86,57 +86,96 @@ app.post('/consultar-lote', async (req, res) => {
 
             if (resInfo.code !== 200) throw new Error(resInfo.code_message);
 
-            // --- LÓGICA DE DETECÇÃO DE ARQUIVO ---
             let urlSupabase = null;
+
+            // --- LÓGICA DE ARQUIVOS ---
             if (resInfo.site_receipts && resInfo.site_receipts.length > 0) {
                 try {
                     const urlOriginal = resInfo.site_receipts[0];
+                    
+                    // 1. Baixa o arquivo como ArrayBuffer (Binário puro)
                     const fileResponse = await axios.get(urlOriginal, { responseType: 'arraybuffer' });
-                    const fileBuffer = fileResponse.data;
-                    
-                    const headerArquivo = fileBuffer.toString('utf-8', 0, 1000).toLowerCase();
-                    
+                    let fileBuffer = fileResponse.data;
+
+                    // 2. Detecção Inteligente (Lê o cabeçalho do arquivo)
+                    const headerArquivo = fileBuffer.toString('utf-8', 0, 100).toLowerCase();
                     let extensao = 'pdf';
                     let contentType = 'application/pdf';
 
-                    if (headerArquivo.startsWith('%pdf-')) {
-                        // É PDF
-                    } else if (headerArquivo.includes('<html') || headerArquivo.includes('<!doctype') || headerArquivo.includes('<body') || headerArquivo.includes('<meta')) {
+                    // Se NÃO for PDF, tratamos como HTML
+                    if (!headerArquivo.startsWith('%pdf')) {
                         extensao = 'html';
-                        contentType = 'text/html; charset=utf-8';
-                    } else {
-                        extensao = 'html'; // Fallback
-                        contentType = 'text/html; charset=utf-8';
+                        contentType = 'text/html; charset=utf-8'; // Força UTF-8 para o navegador
+
+                        // --- CIRURGIA NO HTML (Correção de Visual e Acentos) ---
+                        let htmlContent = fileBuffer.toString('utf-8'); // Converte binário para texto
+
+                        const estiloVisual = `
+                            <style>
+                                body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; padding: 40px; background: #f9f9f9; }
+                                article { max-width: 800px; margin: 0 auto; border: 1px solid #ddd; padding: 40px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-radius: 8px; background: #fff; }
+                                header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 20px; }
+                                h3 { color: #2c3e50; font-size: 1.4rem; margin: 0; text-transform: uppercase; letter-spacing: 1px; }
+                                p { margin-bottom: 15px; text-align: justify; font-size: 0.95rem; }
+                                strong { color: #000; font-weight: 700; }
+                                img { display: none; } /* Esconde imagens quebradas */
+                                .cabecalho-certidao p { margin: 2px 0; font-size: 0.8rem; color: #666; text-align: center; }
+                            </style>
+                            <meta charset="utf-8">
+                        `;
+
+                        // Injeta o estilo no lugar certo
+                        if (htmlContent.includes('<head>')) {
+                            htmlContent = htmlContent.replace('<head>', '<head>' + estiloVisual);
+                        } else if (htmlContent.includes('<body>')) {
+                            htmlContent = htmlContent.replace('<body>', '<body>' + estiloVisual);
+                        } else {
+                            htmlContent = estiloVisual + htmlContent;
+                        }
+
+                        // Reconverte para Buffer para o upload
+                        fileBuffer = Buffer.from(htmlContent, 'utf-8');
                     }
 
-                    const nomeArquivo = `${batchId}/${fonteKey}_${Date.now()}.${extensao}`;
-                    const { error: upErr } = await supabase.storage
-                        .from('arquivos-teste')
-                        .upload(nomeArquivo, fileBuffer, { contentType: contentType, upsert: true });
+                    // 3. Upload para o Supabase (Organizado por user_id)
+                    const nomeArquivo = `${user_id}/${batchId}/${fonteKey}_${Date.now()}.${extensao}`;
                     
+                    const { error: upErr } = await supabase.storage
+                        .from('arquivos-teste') // <--- CONFIRA SE O NOME DO BUCKET ESTÁ CERTO
+                        .upload(nomeArquivo, fileBuffer, { 
+                            contentType: contentType, 
+                            upsert: true 
+                        });
+                    
+                    // 4. RECUPERA A URL (Faltava isso no seu snippet!)
                     if (!upErr) {
                         const { data: urlData } = supabase.storage
                             .from('arquivos-teste')
                             .getPublicUrl(nomeArquivo);
-                        urlSupabase = urlData.publicUrl;
+                        urlSupabase = urlData.publicUrl; // <--- Aqui preenchemos a variável
+                    } else {
+                        console.error('Erro Upload:', upErr);
                     }
+
                 } catch (e) {
-                    console.error(`[${fonteKey}] Erro download:`, e.message);
+                    console.error(`[${fonteKey}] Erro no processamento do arquivo:`, e.message);
                 }
             }
 
+            // 5. Salva no Banco de Dados
             await supabase.from('certidoes_emitidas').insert([{
                 batch_id: batchId,
-                user_id: user_id, // <--- ADICIONAR ESTA LINHA OBRIGATORIAMENTE
+                user_id: user_id, // <--- Importante para o RLS
                 origem: fonteKey,
                 documento_pesquisado: docLimpo,
                 nome_pesquisado: nomeLimpo,
                 resposta_completa_api: resInfo,
-                url_arquivo: urlSupabase,
+                url_arquivo: urlSupabase, // Agora isso terá valor (ou null se falhou)
                 status_resumido: 'SUCESSO'
             }]);
 
             return { origem: fonteKey, status: 'SUCESSO', arquivo: urlSupabase, dados: resInfo.data };
+
 
         } catch (error) {
             const errorMsg = error.response?.data?.code_message || error.message;

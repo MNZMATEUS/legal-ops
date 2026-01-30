@@ -34,10 +34,10 @@ app.get('/', (req, res) => res.send('API Background Check v5 (Mother Name Added)
 
 app.post('/consultar-lote', async (req, res) => {
     // 1. Recebendo nome_mae do Frontend
-    const { documento, nome, data_nascimento, nome_mae, fontes_escolhidas } = req.body;
+    const { documento, nome, data_nascimento, nome_mae, fontes_escolhidas, user_id } = req.body;
     const batchId = uuidv4();
 
-    console.log(`>>> Batch ${batchId}: Iniciando...`);
+    console.log(`>>> Batch ${batchId} para Usuário ${user_id || 'ANON'}: Iniciando...`);
 
     if (!documento || !fontes_escolhidas) {
         return res.status(400).json({ erro: "Dados incompletos." });
@@ -127,6 +127,7 @@ app.post('/consultar-lote', async (req, res) => {
 
             await supabase.from('certidoes_emitidas').insert([{
                 batch_id: batchId,
+                user_id: user_id, // <--- ADICIONAR ESTA LINHA OBRIGATORIAMENTE
                 origem: fonteKey,
                 documento_pesquisado: docLimpo,
                 nome_pesquisado: nomeLimpo,
@@ -141,6 +142,7 @@ app.post('/consultar-lote', async (req, res) => {
             const errorMsg = error.response?.data?.code_message || error.message;
             await supabase.from('certidoes_emitidas').insert([{
                 batch_id: batchId,
+                user_id: user_id, // <--- ADICIONAR ESTA LINHA TAMBÉM NO ERRO
                 origem: fonteKey,
                 documento_pesquisado: docLimpo,
                 status_resumido: 'ERRO',

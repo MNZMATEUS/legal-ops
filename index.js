@@ -105,36 +105,64 @@ app.post('/consultar-lote', async (req, res) => {
                     // Se NÃO for PDF, tratamos como HTML
                     if (!headerArquivo.startsWith('%pdf')) {
                         extensao = 'html';
-                        contentType = 'text/html; charset=utf-8'; // Força UTF-8 para o navegador
+                        contentType = 'text/html; charset=utf-8'; 
 
-                        // --- CIRURGIA NO HTML (Correção de Visual e Acentos) ---
-                        let htmlContent = fileBuffer.toString('latin1'); // Converte binário para texto
+                        // 1. CORREÇÃO DE ACENTUAÇÃO (Decodifica Latin1 para texto correto)
+                        let htmlContent = fileBuffer.toString('latin1'); 
 
+                        // 2. CORREÇÃO DA IMAGEM (O PULO DO GATO 🐱)
+                        // O TRT manda o link relativo "assets/imagens/...". 
+                        // Nós trocamos pelo link COMPLETO do servidor deles.
+                        if (fonteKey === 'trt4') {
+                            htmlContent = htmlContent.replace(
+                                /src="assets\/imagens\/brasao.png"/g, 
+                                'src="https://pje.trt4.jus.br/certidoes/assets/imagens/brasao.png"'
+                            );
+                        }
+
+                        // 3. VISUAL PROFISSIONAL (CSS)
+                        // Nota: Removi o "img { display: none }" para o brasão aparecer!
                         const estiloVisual = `
                             <style>
-                                body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; padding: 40px; background: #f9f9f9; }
-                                article { max-width: 800px; margin: 0 auto; border: 1px solid #ddd; padding: 40px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-radius: 8px; background: #fff; }
-                                header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 20px; }
-                                h3 { color: #2c3e50; font-size: 1.4rem; margin: 0; text-transform: uppercase; letter-spacing: 1px; }
-                                p { margin-bottom: 15px; text-align: justify; font-size: 0.95rem; }
-                                strong { color: #000; font-weight: 700; }
-                                img { display: none; } /* Esconde imagens quebradas */
-                                .cabecalho-certidao p { margin: 2px 0; font-size: 0.8rem; color: #666; text-align: center; }
+                                body { font-family: 'Times New Roman', serif; line-height: 1.5; color: #000; padding: 40px; background: #525659; }
+                                /* Simula uma folha A4 no centro da tela */
+                                article { 
+                                    max-width: 800px; 
+                                    margin: 0 auto; 
+                                    padding: 50px; 
+                                    background: #fff; 
+                                    box-shadow: 0 0 15px rgba(0,0,0,0.5); 
+                                    min-height: 900px; /* Altura de uma folha */
+                                }
+                                header { text-align: center; margin-bottom: 40px; }
+                                
+                                /* Força o brasão a aparecer centralizado e no tamanho certo */
+                                img, .brasao-certidao { 
+                                    display: block !important; 
+                                    margin: 0 auto 15px auto; 
+                                    width: 100px; 
+                                    height: auto;
+                                }
+                                
+                                h3 { font-size: 1.2rem; text-transform: uppercase; text-align: center; margin-top: 20px; text-decoration: underline; }
+                                p { margin-bottom: 15px; text-align: justify; font-size: 1rem; }
+                                strong { font-weight: bold; }
+                                .cabecalho-certidao p { margin: 2px 0; font-size: 0.9rem; text-align: center; font-weight: bold; }
+                                ul { list-style: none; padding: 0; }
+                                .observacoes-certidao { margin-top: 40px; font-size: 0.8rem; border-top: 1px solid #000; padding-top: 10px; }
                             </style>
-                            <meta charset="utf-8">
+                            <meta charset="latin1">
                         `;
 
-                        // Injeta o estilo no lugar certo
+                        // Injeta o estilo
                         if (htmlContent.includes('<head>')) {
                             htmlContent = htmlContent.replace('<head>', '<head>' + estiloVisual);
-                        } else if (htmlContent.includes('<body>')) {
-                            htmlContent = htmlContent.replace('<body>', '<body>' + estiloVisual);
                         } else {
                             htmlContent = estiloVisual + htmlContent;
                         }
 
-                        // Reconverte para Buffer para o upload
-                        fileBuffer = Buffer.from(htmlContent, 'utf-8');
+                        // Reconverte para UTF-8 para salvar no banco
+                        fileBuffer = Buffer.from(htmlContent, 'latin1');
                     }
 
                     // 3. Upload para o Supabase (Organizado por user_id)

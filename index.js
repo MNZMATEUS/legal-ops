@@ -98,14 +98,14 @@ app.post('/consultar-lote', async (req, res) => {
                     let fileBuffer = fileResponse.data;
 
                     // 2. Detecção Inteligente (Lê o cabeçalho do arquivo)
-                    const headerArquivo = fileBuffer.toString('utf-8', 0, 100).toLowerCase();
+                    const headerArquivo = fileBuffer.toString('latin1', 0, 100).toLowerCase();
                     let extensao = 'pdf';
                     let contentType = 'application/pdf';
 
                     // Se NÃO for PDF, tratamos como HTML
                     if (!headerArquivo.startsWith('%pdf')) {
                         extensao = 'html';
-                        contentType = 'text/html; charset=utf-8'; 
+                        contentType = 'text/html; charset=latin1'; 
 
                         // 1. CORREÇÃO DE ACENTUAÇÃO (Decodifica Latin1 para texto correto)
                         let htmlContent = fileBuffer.toString('latin1'); 

@@ -108,7 +108,7 @@ app.post('/consultar-lote', async (req, res) => {
                         contentType = 'text/html; charset=utf-8'; // Força UTF-8 para o navegador
 
                         // --- CIRURGIA NO HTML (Correção de Visual e Acentos) ---
-                        let htmlContent = fileBuffer.toString('utf-8'); // Converte binário para texto
+                        let htmlContent = fileBuffer.toString('latin1'); // Converte binário para texto
 
                         const estiloVisual = `
                             <style>

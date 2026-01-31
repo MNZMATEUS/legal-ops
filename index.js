@@ -165,7 +165,7 @@ app.post('/consultar-lote', async (req, res) => {
                         fileBuffer = Buffer.from(htmlContent, 'latin1');
                     }
 
-                    // 3. Upload para o Supabase (Organizado por user_id)
+                   // 3. Upload para o Supabase (Organizado por user_id)
                     const nomeArquivo = `${user_id}/${batchId}/${fonteKey}_${Date.now()}.${extensao}`;
                     
                     const { error: upErr } = await supabase.storage
@@ -174,6 +174,39 @@ app.post('/consultar-lote', async (req, res) => {
                             contentType: contentType, 
                             upsert: true 
                         });
+                    
+                    // --- O TRECHO QUE FALTAVA ---
+                    // Se não houve erro no upload, geramos o link público
+                    if (!upErr) {
+                        const { data: urlData } = supabase.storage
+                            .from('arquivos-teste')
+                            .getPublicUrl(nomeArquivo);
+                        urlSupabase = urlData.publicUrl; // Atualiza a variável para salvar no banco
+                    } else {
+                        console.error('Erro Upload:', upErr);
+                    }
+                    // -----------------------------
+
+                    // Captura o link original (se existir) da InfoSimples
+                    const linkOriginal = resInfo.site_receipts && resInfo.site_receipts.length > 0 
+                        ? resInfo.site_receipts[0] 
+                        : null;
+        
+                    // Salva no Banco de Dados
+                    await supabase.from('certidoes_emitidas').insert([{
+                        batch_id: batchId,
+                        user_id: user_id,
+                        origem: fonteKey,
+                        documento_pesquisado: docLimpo,
+                        nome_pesquisado: nomeLimpo,
+                        resposta_completa_api: resInfo,
+                        
+                        url_arquivo: urlSupabase, // Agora isso terá o link correto do seu PDF
+                        url_origem: linkOriginal, // Link original da fonte
+                        
+                        status_resumido: 'SUCESSO'
+                    }]);
+                    
                     
                     // 4. RECUPERA A URL (Faltava isso no seu snippet!)
                     if (!upErr) {

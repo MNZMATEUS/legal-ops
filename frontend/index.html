@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legal Ops CRM - Painel Seguro</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* --- 1. VARIÁVEIS E BASE --- */
+        :root {
+            --bg-dark: #0f172a; --bg-panel: #1e293b; 
+            --primary: #3b82f6; --primary-hover: #2563eb;
+            --text-main: #f8fafc; --text-muted: #94a3b8; --border: #334155;
+            --danger: #ef4444; --success: #10b981; --warning: #f59e0b;
+            --sidebar-width: 260px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Inter', sans-serif; background-color: var(--bg-dark); color: var(--text-main);
+            display: flex; height: 100vh; overflow: hidden;
+        }
+
+        /* --- 2. SIDEBAR --- */
+        .sidebar {
+            width: var(--sidebar-width); background-color: var(--bg-panel); border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; padding: 20px;
+        }
+        .logo { font-size: 1.1rem; font-weight: 700; color: var(--primary); margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
+        
+        .user-info {
+            background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+        .user-email { font-size: 0.8rem; color: white; font-weight: 600; display: block; margin-bottom: 5px; word-break: break-all; }
+        .user-credits { font-size: 0.75rem; color: var(--success); font-weight: 600; display: flex; align-items: center; gap: 5px; }
+
+        .nav-btn {
+            background: none; border: none; color: var(--text-muted); padding: 12px 15px;
+            text-align: left; cursor: pointer; font-size: 0.9rem; border-radius: 8px;
+            transition: all 0.2s; display: flex; align-items: center; gap: 10px; margin-bottom: 5px; width: 100%;
+        }
+        .nav-btn:hover, .nav-btn.active { background-color: rgba(59, 130, 246, 0.1); color: var(--primary); font-weight: 500; }
+
+        /* --- 3. LAYOUT PRINCIPAL --- */
+        .main-content { flex: 1; padding: 30px; overflow-y: auto; }
+        .header { margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 1.5rem; font-weight: 600; }
+
+        /* --- 4. FORMULÁRIOS --- */
+        .form-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 800px;
+            background: var(--bg-panel); padding: 25px; border-radius: 10px; border: 1px solid var(--border);
+        }
+        .full-width { grid-column: span 2; }
+        label { display: block; margin-bottom: 8px; font-size: 0.85rem; color: var(--text-muted); }
+        input, select {
+            width: 100%; background-color: var(--bg-dark); border: 1px solid var(--border);
+            color: var(--text-main); padding: 10px; border-radius: 6px; font-family: inherit;
+        }
+        input:focus { outline: none; border-color: var(--primary); }
+
+        .btn-primary {
+            background-color: var(--primary); color: white; border: none; padding: 10px 20px;
+            border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px;
+        }
+        .btn-primary:hover { background-color: var(--primary-hover); }
+
+        /* --- 5. CARDS E DASHBOARD --- */
+        .dossier-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+        .dossier-header { padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .dossier-header:hover { background: rgba(255,255,255,0.02); }
+        .dossier-body { display: none; padding: 15px; border-top: 1px solid var(--border); background: rgba(0,0,0,0.2); }
+        
+        .cert-card { 
+            background: #0f172a; padding: 10px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #ccc; 
+        }
+        .cert-card.success { border-left-color: var(--success); }
+        .cert-card.error { border-left-color: var(--danger); }
+        
+        .btn-action { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; cursor: pointer; text-decoration: none; border: 1px solid var(--border); display: inline-flex; gap: 5px; align-items: center; color: white; }
+        .btn-pdf { background: #dc2626; border-color: #dc2626; }
+        .btn-link { background: #2563eb; border-color: #2563eb; }
+
+        /* --- 6. MODAL --- */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 999; justify-content: center; align-items: center;
+        }
+        .modal-content { background: var(--bg-panel); width: 90%; height: 90%; border-radius: 8px; display: flex; flex-direction: column; }
+        iframe { flex: 1; border: none; background: white; }
+
+        /* --- 7. UTILS --- */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: fadeIn 0.3s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .tag { padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: #334155; color: #cbd5e1; margin-left: 8px; }
+
+        /* --- 8. DASHBOARD ANALÍTICO (NOVO) --- */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .kpi-card {
+            background: var(--bg-panel);
+            border-radius: 8px;
+            padding: 20px;
+            border-top: 4px solid var(--border);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .kpi-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 10px;
+        }
+        .kpi-title { font-size: 1.1rem; font-weight: 600; color: var(--text-main); }
+        .kpi-icon { font-size: 1.2rem; opacity: 0.7; }
+        
+        /* Destaque do número total */
+        .kpi-big-number { font-size: 2.5rem; font-weight: 700; color: white; margin-bottom: 5px; }
+        .kpi-subtitle { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 15px; }
+        
+        /* Tabela interna do card */
+        .stats-table { width: 100%; font-size: 0.85rem; border-collapse: collapse; }
+        .stats-table td { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .stats-table tr:last-child td { border-bottom: none; }
+        .text-right { text-align: right; }
+        
+        /* Cores dos status (Dots) */
+        .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        .dot-pendente { background: #94a3b8; }
+        .dot-vencida { background: #ef4444; }
+        .dot-negativa { background: #10b981; }
+        .dot-positiva { background: #f59e0b; }
+        .dot-efeito { background: #3b82f6; }
+        
+
+        
+    </style>
+</head>
+<body>
+
+    <div id="modal-viewer" class="modal-overlay">
+        <div class="modal-content">
+            <div style="padding:15px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between;">
+                <h3 id="modal-title">Documento</h3>
+                <button id="btn-fechar-modal" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;">&times;</button>
+            </div>
+            <iframe id="doc-frame" src=""></iframe>
+        </div>
+    </div>
+
+    <div class="sidebar">
+        <div class="logo"><i class="fa-solid fa-scale-balanced"></i> Legal Ops CRM</div>
+        
+        <div class="user-info">
+            <span id="user-email" class="user-email">Carregando...</span>
+            <div class="user-credits">
+                <i class="fa-solid fa-coins"></i> <span id="user-saldo">...</span> Créditos
+            </div>
+        </div>
+
+        <button id="nav-cadastro" class="nav-btn active"><i class="fa-solid fa-user-plus"></i> Novo Cadastro</button>
+        <button id="nav-dash" class="nav-btn"><i class="fa-solid fa-folder-open"></i> Dossiês</button>
+        <button id="nav-execucao" class="nav-btn"><i class="fa-solid fa-bolt"></i> Execução</button>
+        
+        <div style="margin-top: auto;">
+            <button id="btn-logout" class="nav-btn" style="color: var(--danger); width: 100%;">
+                <i class="fa-solid fa-right-from-bracket"></i> Sair
+            </button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        
+        <div id="aba-cadastro" class="tab-content active">
+            <div class="header"><h1>Novo Cadastro</h1></div>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>📁 Grupo / Projeto</label>
+                    <input type="text" id="grupo" list="lista-grupos" placeholder="Ex: Projeto Abril...">
+                    <datalist id="lista-grupos"></datalist>
+                </div>
+                <div class="form-group"><label>Tipo</label>
+                    <select id="tipo"><option value="PF">Pessoa Física</option><option value="PJ">Pessoa Jurídica</option></select>
+                </div>
+                <div class="form-group"><label>Documento</label><input type="text" id="documento" placeholder="Apenas números"></div>
+                <div class="form-group full-width"><label>Nome</label><input type="text" id="nome"></div>
+                
+                <div class="form-group pf-only"><label>Data Nascimento</label><input type="date" id="data_nascimento"></div>
+                <div class="form-group pf-only"><label>Nome Mãe</label><input type="text" id="nome_mae"></div>
+                
+                <div class="form-group full-width" style="margin-top:10px;">
+                    <button id="btn-salvar" class="btn-primary">Salvar Cadastro</button>
+                    <span id="msg-cadastro" style="margin-left:10px; font-size:0.9rem;"></span>
+                </div>
+            </div>
+        </div>
+
+        <div id="aba-dash" class="tab-content">
+            <div class="header">
+                <h1>Dossiês de Compliance</h1>
+                <button id="btn-atualizar-dash" class="btn-primary" style="font-size:0.8rem;">
+                    <i class="fa-solid fa-rotate"></i> Atualizar
+                </button>
+            </div>
+            
+            <div id="dashboard-analytics">
+                </div>
+            <h3 style="margin: 30px 0 15px 0; border-bottom: 1px solid var(--border); padding-bottom: 10px;">Detalhamento por Pasta</h3>
+            <div style="margin-bottom:15px;">
+                <label>Filtrar por Grupo:</label>
+                <select id="filtro-dash" style="max-width:300px; margin-top:5px;"></select>
+            </div>
+            <div id="container-dossies">
+                </div>
+        </div>
+
+        <div id="aba-execucao" class="tab-content">
+            <div class="header"><h1>Central de Execução</h1></div>
+            
+            <div style="background:var(--bg-panel); padding:20px; border-radius:8px; border:1px solid var(--border); margin-bottom:20px;">
+                <label>1. Selecione o Grupo:</label>
+                <select id="filtro-execucao" style="margin-top:5px; width:100%; max-width:400px; margin-bottom:15px;"></select>
+                
+                <div style="display:flex; gap:15px; margin-bottom:15px;">
+                    <label><input type="checkbox" class="chk-fonte" value="trt4" checked> TRT4</label>
+                    <label><input type="checkbox" class="chk-fonte" value="receita_federal" checked> Receita</label>
+                    <label><input type="checkbox" class="chk-fonte" value="policia_federal" checked> PF</label>
+                </div>
+                
+                <button id="btn-processar" class="btn-primary" style="background:var(--success);">PROCESSAR SELECIONADOS</button>
+            </div>
+
+            <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
+                <thead>
+                    <tr style="text-align:left; color:var(--text-muted); font-size:0.85rem;">
+                        <th width="30"><input type="checkbox" id="chk-todos"></th>
+                        <th>Nome</th> <th>Doc</th> <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="tbody-exec"></tbody>
+            </table>
+            
+            <div id="console" style="background:#000; color:#33ff00; padding:15px; height:150px; overflow-y:auto; border-radius:6px; font-family:monospace; font-size:0.8rem;">
+                > Aguardando comando...
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. CONFIGURAÇÃO & ESTADO GLOBAL
+        // ==========================================
+        const CONFIG = {
+            SUPABASE_URL: 'https://zqbxevggjeokwnzwndns.supabase.co',
+            SUPABASE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpxYnhldmdnamVva3duenduZG5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkxMzIwODgsImV4cCI6MjA4NDcwODA4OH0.MBclKq59N5lY_a2NEQ-JrpoEOVOCmHdhvn7MwGYFsok',
+            API_BASE_URL: 'https://legal-ops-1.onrender.com'
+        };
+
+        const CONFIG_AREAS = {
+            'global': { titulo: 'Visão Global', cor: '#fff', icon: 'fa-globe' },
+            'civil': { titulo: 'Cível', cor: '#3b82f6', icon: 'fa-scale-balanced' },
+            'fiscal': { titulo: 'Fiscal', cor: '#10b981', icon: 'fa-file-invoice-dollar' },
+            'trabalhista': { titulo: 'Trabalhista', cor: '#f59e0b', icon: 'fa-helmet-safety' },
+            'ambiental': { titulo: 'Ambiental', cor: '#84cc16', icon: 'fa-tree' },
+            'outros': { titulo: 'Outros/Geral', cor: '#64748b', icon: 'fa-folder' }
+        };
+
+        const STATE = {
+            user: null,
+            entidades: [],
+            certidoes: [], // Cache das certidões
+            supabase: null
+        };
+
+        // ==========================================
+        // 2. INICIALIZAÇÃO (ENTRY POINT)
+        // ==========================================
+        document.addEventListener('DOMContentLoaded', initApp);
+
+        async function initApp() {
+            try {
+                // Configura Supabase
+                if (typeof supabase === 'undefined') throw new Error("Supabase Library not loaded");
+                STATE.supabase = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
+
+                // Setup de Event Listeners (Botões e Inputs)
+                setupEventListeners();
+
+                // Verifica Sessão
+                const { data: { session } } = await STATE.supabase.auth.getSession();
+                if (!session) {
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                STATE.user = session.user;
+                document.getElementById('user-email').innerText = STATE.user.email;
+                console.log("Sistema iniciado para:", STATE.user.email);
+
+                // Carregamento Inicial de Dados
+                await Promise.all([
+                    atualizarSaldo(),
+                    carregarEntidades() // Carrega cadastros e preenche selects
+                ]);
+
+                // Carrega Dash automaticamente (Prevenção de Tela Vazia)
+                atualizarDashboard();
+
+            } catch (e) {
+                console.error("Erro fatal na inicialização:", e);
+                alert("Erro ao iniciar sistema. Verifique o console.");
+            }
+        }
+
+        function setupEventListeners() {
+            // Navegação
+            document.getElementById('nav-cadastro').addEventListener('click', () => navigate('aba-cadastro'));
+            document.getElementById('nav-dash').addEventListener('click', () => {
+                navigate('aba-dash');
+                // Opcional: Recarregar ao clicar na aba?
+                // atualizarDashboard(); 
+            });
+            document.getElementById('nav-execucao').addEventListener('click', () => {
+                navigate('aba-execucao');
+                renderTabelaExecucao();
+            });
+            document.getElementById('btn-logout').addEventListener('click', fazerLogout);
+
+            // Cadastro
+            document.getElementById('btn-salvar').addEventListener('click', salvarCadastro);
+            document.getElementById('tipo').addEventListener('change', toggleCamposPF);
+
+            // Dashboard
+            document.getElementById('btn-atualizar-dash').addEventListener('click', atualizarDashboard);
+            document.getElementById('filtro-dash').addEventListener('change', renderizarDashboard);
+
+            // Execução
+            document.getElementById('filtro-execucao').addEventListener('change', renderTabelaExecucao);
+            document.getElementById('chk-todos').addEventListener('click', (e) => toggleAllCheckboxes(e.target));
+            document.getElementById('btn-processar').addEventListener('click', rodarLote);
+
+            // Modal
+            document.getElementById('btn-fechar-modal').addEventListener('click', fecharModal);
+        }
+
+        // ==========================================
+        // 3. CAMADA DE DADOS (DATA LAYER)
+        // ==========================================
+        
+        // Busca Entidades (Pessoas/Empresas)
+        async function carregarEntidades() {
+            const { data, error } = await STATE.supabase
+                .from('entidades')
+                .select('*')
+                .order('created_at', { ascending: false });
+            
+            if (error) { console.error("Erro ao buscar entidades:", error); return; }
+            
+            STATE.entidades = data || [];
+            atualizarSelectsGrupos();
+        }
+
+        // Busca Certidões (Resultados) - NOVA FUNÇÃO ESSENCIAL
+        async function buscarCertidoes() {
+            const { data, error } = await STATE.supabase
+                .from('certidoes_emitidas')
+                .select('*')
+                // Otimização: buscar apenas as mais recentes ou limitar se tiver muitos dados
+                .order('created_at', { ascending: false });
+
+            if (error) {
+                console.error("Erro ao buscar certidões:", error);
+                return [];
+            }
+            return data;
+        }
+
+        async function atualizarSaldo() {
+            const { data } = await STATE.supabase.from('profiles').select('creditos').eq('id', STATE.user.id).single();
+            if(data) document.getElementById('user-saldo').innerText = data.creditos;
+        }
+
+        async function fazerLogout() {
+            await STATE.supabase.auth.signOut();
+            window.location.href = 'login.html';
+        }
+
+        // ==========================================
+        // 4. LÓGICA DE NEGÓCIO
+        // ==========================================
+
+        async function salvarCadastro() {
+            const btn = document.getElementById('btn-salvar');
+            btn.innerText = "Salvando...";
+            btn.disabled = true;
+
+            const dados = {
+                nome: document.getElementById('nome').value,
+                documento: document.getElementById('documento').value.replace(/\D/g, ''),
+                tipo: document.getElementById('tipo').value,
+                grupo: document.getElementById('grupo').value || 'Geral',
+                data_nascimento: document.getElementById('data_nascimento').value || null,
+                nome_mae: document.getElementById('nome_mae').value,
+                user_id: STATE.user.id
+            };
+
+            if(!dados.nome || !dados.documento) {
+                alert("Preencha Nome e Documento.");
+                btn.innerText = "Salvar Cadastro";
+                btn.disabled = false;
+                return;
+            }
+
+            const { error } = await STATE.supabase.from('entidades').insert([dados]);
+
+            if(error) {
+                alert("Erro: " + error.message);
+                document.getElementById('msg-cadastro').style.color = 'var(--danger)';
+                document.getElementById('msg-cadastro').innerText = "Erro ao salvar.";
+            } else {
+                document.getElementById('msg-cadastro').style.color = 'var(--success)';
+                document.getElementById('msg-cadastro').innerText = "Sucesso!";
+                limparFormulario();
+                await carregarEntidades(); // Recarrega para aparecer nas listas
+            }
+            btn.innerText = "Salvar Cadastro";
+            btn.disabled = false;
+        }
+
+        function calcularEstatisticas(certidoes) {
+            // Template de contadores zerados
+            const novoCounter = () => ({
+                total: 0, pendentes: 0, vencidas: 0, negativas: 0, 
+                positivas: 0, positiva_efeito: 0, na: 0
+            });
+        
+            const stats = {
+                global: novoCounter(),
+                civil: novoCounter(),
+                fiscal: novoCounter(),
+                trabalhista: novoCounter(),
+                ambiental: novoCounter(),
+                outros: novoCounter()
+            };
+        
+            const hoje = new Date();
+        
+            certidoes.forEach(cert => {
+                // 1. Define a área (usa a nova coluna do banco ou cai em 'outros')
+                let area = cert.area ? cert.area.toLowerCase() : 'outros';
+                if (!stats[area]) area = 'outros'; // Segurança se vier algo estranho do banco
+        
+                // 2. Verifica Validade (Ex: 30 dias)
+                const dataEmissao = new Date(cert.created_at);
+                const diasDiff = Math.floor((hoje - dataEmissao) / (1000 * 60 * 60 * 24));
+                const vencida = diasDiff > 30; 
+        
+                // 3. Normaliza status
+                const status = (cert.status_resumido || '').toLowerCase();
+        
+                // Função auxiliar para somar no Global e na Área específica
+                const computar = (campo) => {
+                    stats.global[campo]++;
+                    stats[area][campo]++;
+                };
+        
+                computar('total');
+        
+                if (vencida) {
+                    computar('vencidas');
+                } else if (status.includes('pendente') || status === '' || status === 'aguardando') {
+                    computar('pendentes');
+                } else if (status.includes('efeito') && status.includes('negativa')) { // Positiva com efeito
+                    computar('positiva_efeito');
+                } else if (status.includes('negativa')) {
+                    computar('negativas');
+                } else if (status.includes('positiva')) {
+                    computar('positivas');
+                } else {
+                    computar('na');
+                }
+            });
+        
+            return stats;
+        }
+
+        // Função Principal do Dash - Busca e Renderiza
+        async function atualizarDashboard() {
+            const btn = document.getElementById('btn-atualizar-dash');
+            const icon = btn.querySelector('i');
+            
+            // UI Feedback
+            icon.classList.add('fa-spin');
+            btn.disabled = true;
+            document.getElementById('container-dossies').style.opacity = '0.5';
+
+            // 1. Garante que temos as entidades atualizadas
+            await carregarEntidades();
+
+            // 2. Busca as certidões no banco
+            STATE.certidoes = await buscarCertidoes();
+
+            // 3. Renderiza a tela
+            renderizarDashboard();
+            renderizarPainelAnalytics();
+
+            // UI Reset
+            icon.classList.remove('fa-spin');
+            btn.disabled = false;
+            document.getElementById('container-dossies').style.opacity = '1';
+        }
+
+        async function rodarLote() {
+            const ids = Array.from(document.querySelectorAll('.chk-alvo:checked')).map(c => c.value);
+            const fontes = Array.from(document.querySelectorAll('.chk-fonte:checked')).map(c => c.value);
+            const consoleDiv = document.getElementById('console');
+
+            if(ids.length === 0 || fontes.length === 0) return alert("Selecione pessoas e fontes.");
+
+            for(const id of ids) {
+                const ent = STATE.entidades.find(e => e.id == id);
+                document.getElementById(`st-${id}`).innerText = "⏳ ...";
+                consoleDiv.innerHTML += `<div>> Enviando ${ent.nome}...</div>`;
+
+                try {
+                    const res = await fetch(`${CONFIG.API_BASE_URL}/consultar-lote`, {
+                        method: 'POST',
+                        headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({
+                            user_id: STATE.user.id, 
+                            nome: ent.nome, 
+                            documento: ent.documento, 
+                            tipo: ent.tipo,
+                            data_nascimento: ent.data_nascimento, 
+                            nome_mae: ent.nome_mae,
+                            fontes_escolhidas: fontes
+                        })
+                    });
+                    const json = await res.json();
+                    
+                    if(json.batch_id) {
+                        document.getElementById(`st-${id}`).innerHTML = "<span style='color:var(--success)'>OK</span>";
+                        consoleDiv.innerHTML += `<div style="color:var(--success)">> Sucesso (Batch: ${json.batch_id}).</div>`;
+                    } else {
+                        throw new Error(json.error || "Erro API");
+                    }
+                } catch(e) {
+                    document.getElementById(`st-${id}`).innerHTML = "<span style='color:var(--danger)'>Erro</span>";
+                    consoleDiv.innerHTML += `<div style="color:var(--danger)">> Falha: ${e.message}</div>`;
+                }
+                consoleDiv.scrollTop = consoleDiv.scrollHeight;
+            }
+            await atualizarSaldo(); 
+            // Atualiza Dash em background
+            buscarCertidoes().then(data => { STATE.certidoes = data; });
+        }
+
+        // ==========================================
+        // 5. CAMADA DE INTERFACE (UI)
+        // ==========================================
+
+        function renderizarDashboard() {
+            const grupoSelecionado = document.getElementById('filtro-dash').value;
+            const container = document.getElementById('container-dossies');
+            container.innerHTML = '';
+
+            // Filtra Entidades
+            let entidadesFiltradas = STATE.entidades;
+            if (grupoSelecionado && grupoSelecionado !== 'TODOS') {
+                entidadesFiltradas = entidadesFiltradas.filter(e => (e.grupo || 'Geral') === grupoSelecionado);
+            }
+
+            if (entidadesFiltradas.length === 0) {
+                container.innerHTML = '<div style="text-align:center; padding:20px; color:#94a3b8">Nenhum cadastro encontrado para este filtro.</div>';
+                return;
+            }
+
+            entidadesFiltradas.forEach(entidade => {
+                // Encontra certidões desta entidade (comparando numeros limpos)
+                const docEntidade = entidade.documento.replace(/\D/g, '');
+                
+                const certidoesEntidade = STATE.certidoes.filter(c => {
+                    const docCert = (c.documento_pesquisado || '').replace(/\D/g, '');
+                    return docCert === docEntidade;
+                });
+
+                const count = certidoesEntidade.length;
+                const hasData = count > 0;
+                const color = hasData ? 'var(--success)' : '#64748b';
+
+                // Cria o Card HTML
+                const card = document.createElement('div');
+                card.className = 'dossier-card';
+                
+                // Header do Card
+                const headerHtml = `
+                    <div class="dossier-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'block' ? 'none' : 'block'">
+                        <div>
+                            <strong>${entidade.nome}</strong> 
+                            <span class="tag">${entidade.grupo || 'Geral'}</span>
+                        </div>
+                        <div style="color:${color}; font-weight:bold; font-size:0.8rem; display:flex; align-items:center; gap:5px;">
+                            ${count} Arquivos <i class="fa-solid fa-chevron-down"></i>
+                        </div>
+                    </div>
+                `;
+
+                // Body do Card (Conteúdo Interno)
+                let bodyContent = '';
+                if (!hasData) {
+                    bodyContent = '<div style="color:#64748b; font-size:0.9rem;">Nenhuma consulta realizada ainda. Vá para a aba Execução.</div>';
+                } else {
+                    bodyContent = certidoesEntidade.map(cert => {
+                        const isErro = cert.status_resumido === 'ERRO';
+                        const classe = isErro ? 'error' : 'success';
+                        const dataFmt = new Date(cert.created_at).toLocaleString('pt-BR');
+                        const origem = (cert.origem || 'Sistema').toUpperCase().replace('_', ' ');
+                        const erroMsg = isErro ? `<div style="color:var(--danger); font-size:0.75rem;">${cert.resposta_completa_api?.erro || 'Erro API'}</div>` : '';
+                        
+                        // Botões
+                        let btnPdf = cert.url_arquivo ? `<button class="btn-action btn-pdf" onclick="abrirModal('${cert.url_arquivo}')"><i class="fa-solid fa-file-pdf"></i> PDF</button>` : '';
+                        let btnLink = cert.url_origem ? `<a href="${cert.url_origem}" target="_blank" class="btn-action btn-link"><i class="fa-solid fa-arrow-up-right-from-square"></i> Fonte</a>` : '';
+
+                        return `
+                            <div class="cert-card ${classe}">
+                                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                                    <span style="font-weight:600; font-size:0.8rem;">${origem}</span>
+                                    <span style="font-size:0.7rem; color:#aaa;">${dataFmt}</span>
+                                </div>
+                                <div style="display:flex; gap:10px;">${btnPdf}${btnLink}</div>
+                                ${erroMsg}
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                card.innerHTML = headerHtml + `<div class="dossier-body">${bodyContent}</div>`;
+                container.appendChild(card);
+            });
+        }
+
+        function renderizarPainelAnalytics() {
+            const container = document.getElementById('dashboard-analytics');
+            if (!container) return;
+        
+            const stats = calcularEstatisticas(STATE.certidoes);
+            
+            // Ordem de exibição
+            const areasOrdem = ['global', 'civil', 'fiscal', 'trabalhista', 'ambiental'];
+        
+            let html = '<div class="kpi-grid">';
+        
+            areasOrdem.forEach(chave => {
+                const dados = stats[chave] || stats['outros']; // Fallback
+                const config = CONFIG_AREAS[chave] || CONFIG_AREAS['outros'];
+                
+                // Calculo de % simples
+                const pct = (val) => dados.total === 0 ? '0%' : Math.round((val/dados.total)*100) + '%';
+        
+                html += `
+                <div class="kpi-card" style="border-top-color: ${config.cor}">
+                    <div class="kpi-header">
+                        <span class="kpi-title" style="color:${chave === 'global' ? 'white' : config.cor}">
+                            ${config.titulo}
+                        </span>
+                        <i class="fa-solid ${config.icon} kpi-icon"></i>
+                    </div>
+                    
+                    <div class="kpi-big-number">${dados.total}</div>
+                    <div class="kpi-subtitle">Total de Certidões</div>
+        
+                    <table class="stats-table">
+                        <tr>
+                            <td><span class="status-dot dot-pendente"></span> Pendentes</td>
+                            <td class="text-right">${dados.pendentes}</td>
+                            <td class="text-right" style="color:#64748b">${pct(dados.pendentes)}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="status-dot dot-vencida"></span> Vencidas</td>
+                            <td class="text-right">${dados.vencidas}</td>
+                            <td class="text-right" style="color:#64748b">${pct(dados.vencidas)}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="status-dot dot-negativa"></span> Negativas</td>
+                            <td class="text-right">${dados.negativas}</td>
+                            <td class="text-right" style="color:#64748b">${pct(dados.negativas)}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="status-dot dot-positiva"></span> Positivas</td>
+                            <td class="text-right">${dados.positivas}</td>
+                            <td class="text-right" style="color:#64748b">${pct(dados.positivas)}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="status-dot dot-efeito"></span> Pos. Ef. Neg.</td>
+                            <td class="text-right">${dados.positiva_efeito}</td>
+                            <td class="text-right" style="color:#64748b">${pct(dados.positiva_efeito)}</td>
+                        </tr>
+                    </table>
+                </div>
+                `;
+            });
+        
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function renderTabelaExecucao() {
+            const grupo = document.getElementById('filtro-execucao').value;
+            const tbody = document.getElementById('tbody-exec');
+            tbody.innerHTML = '';
+
+            let lista = STATE.entidades;
+            if(grupo && grupo !== 'TODOS') lista = lista.filter(e => (e.grupo||'Geral') === grupo);
+
+            if(lista.length === 0) { tbody.innerHTML = '<tr><td colspan="4" style="padding:20px; text-align:center;">Nenhum cadastro encontrado.</td></tr>'; return; }
+
+            lista.forEach(e => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><input type="checkbox" class="chk-alvo" value="${e.id}"></td>
+                    <td>${e.nome}</td>
+                    <td>${e.documento}</td>
+                    <td id="st-${e.id}" style="font-size:0.8rem; color:#64748b">Aguardando</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function atualizarSelectsGrupos() {
+            const grupos = [...new Set(STATE.entidades.map(e => e.grupo || 'Geral'))].sort();
+            const opts = grupos.map(g => `<option value="${g}">${g}</option>`).join('');
+            
+            // Lista para Input de Cadastro
+            document.getElementById('lista-grupos').innerHTML = opts;
+            
+            // Lista para Filtros (com opção TODOS)
+            const optsFilter = `<option value="TODOS">Todos</option>` + opts;
+            
+            // Atualiza apenas se o valor atual não existir mais ou estiver vazio
+            const filtroDash = document.getElementById('filtro-dash');
+            const filtroExec = document.getElementById('filtro-execucao');
+            
+            const currentDash = filtroDash.value;
+            filtroDash.innerHTML = optsFilter;
+            if(currentDash) filtroDash.value = currentDash;
+
+            const currentExec = filtroExec.value;
+            filtroExec.innerHTML = optsFilter;
+            if(currentExec) filtroExec.value = currentExec;
+        }
+
+        // --- Helpers ---
+        function navigate(tabId) {
+            document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(e => e.classList.remove('active'));
+            
+            document.getElementById(tabId).classList.add('active');
+            
+            // Marca o botão sidebar ativo
+            if(tabId === 'aba-cadastro') document.getElementById('nav-cadastro').classList.add('active');
+            if(tabId === 'aba-dash') document.getElementById('nav-dash').classList.add('active');
+            if(tabId === 'aba-execucao') document.getElementById('nav-execucao').classList.add('active');
+        }
+
+        function toggleCamposPF() {
+            const isPF = document.getElementById('tipo').value === 'PF';
+            document.querySelectorAll('.pf-only').forEach(el => el.style.display = isPF ? 'block' : 'none');
+        }
+
+        function limparFormulario() {
+            document.getElementById('nome').value = '';
+            document.getElementById('documento').value = '';
+            document.getElementById('nome_mae').value = '';
+            document.getElementById('data_nascimento').value = '';
+        }
+
+        function toggleAllCheckboxes(source) {
+            document.querySelectorAll('.chk-alvo').forEach(c => c.checked = source.checked);
+        }
+
+        function abrirModal(url) {
+            document.getElementById('doc-frame').src = url;
+            document.getElementById('modal-viewer').style.display = 'flex';
+        }
+
+        function fecharModal() {
+            document.getElementById('modal-viewer').style.display = 'none';
+            document.getElementById('doc-frame').src = '';
+        }
+
+        // Expõe para o escopo global apenas o que for estritamente necessário para debug
+        // (Em produção, idealmente não expomos nada, mas aqui ajuda)
+        window.abrirModal = abrirModal; 
+    </script>
+</body>
+</html>

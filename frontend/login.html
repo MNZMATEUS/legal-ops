@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legal Ops CRM - Acesso</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #0f172a; --panel: #1e293b; --primary: #3b82f6; --text: #f8fafc; }
+        body { 
+            background-color: var(--bg); color: var(--text); font-family: 'Inter', sans-serif;
+            display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;
+        }
+        .login-box {
+            background: var(--panel); padding: 40px; border-radius: 12px;
+            width: 100%; max-width: 400px; border: 1px solid #334155; text-align: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        h2 { margin-bottom: 10px; color: var(--primary); }
+        p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 25px; }
+        
+        input {
+            width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 6px;
+            border: 1px solid #334155; background: var(--bg); color: white; box-sizing: border-box;
+            font-size: 1rem;
+        }
+        input:focus { outline: none; border-color: var(--primary); }
+        
+        button {
+            width: 100%; padding: 12px; background: var(--primary); color: white;
+            border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s;
+            font-size: 1rem;
+        }
+        button:hover { background-color: #2563eb; }
+        button:disabled { opacity: 0.7; cursor: not-allowed; }
+
+        .switch-link {
+            margin-top: 20px; font-size: 0.9rem; color: #94a3b8; cursor: pointer; 
+        }
+        .switch-link span { text-decoration: underline; color: var(--primary); }
+        
+        .error-msg { 
+            background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid #ef4444;
+            padding: 10px; border-radius: 6px; font-size: 0.9rem; margin-bottom: 15px; display: none; 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-box">
+        <h2 id="titulo-form">Bem-vindo</h2>
+        <p id="subtitulo-form">Faça login para acessar o sistema.</p>
+        
+        <div id="msg-erro" class="error-msg"></div>
+
+        <input type="email" id="email" placeholder="Seu E-mail">
+        <input type="password" id="senha" placeholder="Sua Senha">
+        
+        <button id="btn-acao" onclick="handleAuth()">ENTRAR</button>
+        
+        <div class="switch-link" onclick="alternarModo()">
+            <span id="texto-link">Não tem conta? Crie agora.</span>
+        </div>
+    </div>
+
+    <script>
+        // --- 2. CONFIGURAÇÃO (Variável renomeada para _supabase) ---
+        const SUPABASE_URL = 'https://zqbxevggjeokwnzwndns.supabase.co'; // <--- INSIRA SUA URL
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpxYnhldmdnamVva3duenduZG5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkxMzIwODgsImV4cCI6MjA4NDcwODA4OH0.MBclKq59N5lY_a2NEQ-JrpoEOVOCmHdhvn7MwGYFsok';      // <--- INSIRA SUA CHAVE ANON
+
+        // Inicializa o cliente com nome seguro para evitar conflito
+        const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let isLogin = true;
+
+        // Função para trocar entre Login e Cadastro
+        function alternarModo() {
+            isLogin = !isLogin;
+            const titulo = document.getElementById('titulo-form');
+            const sub = document.getElementById('subtitulo-form');
+            const btn = document.getElementById('btn-acao');
+            const link = document.getElementById('texto-link');
+            const erro = document.getElementById('msg-erro');
+
+            if (isLogin) {
+                titulo.innerText = "Bem-vindo";
+                sub.innerText = "Faça login para acessar o sistema.";
+                btn.innerText = "ENTRAR";
+                link.innerText = "Não tem conta? Crie agora.";
+            } else {
+                titulo.innerText = "Criar Conta";
+                sub.innerText = "Cadastre-se para ganhar 10 créditos grátis.";
+                btn.innerText = "CRIAR CONTA";
+                link.innerText = "Já tenho conta. Fazer Login.";
+            }
+            erro.style.display = 'none';
+        }
+
+        // Função Principal de Autenticação
+        async function handleAuth() {
+            const email = document.getElementById('email').value;
+            const senha = document.getElementById('senha').value;
+            const msgErro = document.getElementById('msg-erro');
+            const btn = document.getElementById('btn-acao');
+
+            // Validação simples
+            if(!email || !senha) {
+                msgErro.innerText = "Preencha e-mail e senha.";
+                msgErro.style.display = 'block'; return;
+            }
+
+            // Feedback visual de carregamento
+            const textoOriginal = btn.innerText;
+            btn.innerText = "Processando...";
+            btn.disabled = true;
+            msgErro.style.display = 'none';
+
+            try {
+                let result;
+                
+                if (isLogin) {
+                    // LOGIN: Tenta entrar
+                    result = await _supabase.auth.signInWithPassword({ email: email, password: senha });
+                } else {
+                    // CADASTRO: Cria usuário
+                    result = await _supabase.auth.signUp({ email: email, password: senha });
+                }
+
+                if (result.error) throw result.error;
+
+                // Sucesso!
+                if (!isLogin && !result.data.session) {
+                    // Cadastro feito, mas requer confirmação de e-mail (depende da config do Supabase)
+                    alert("Conta criada! Se necessário, verifique seu e-mail para confirmar.");
+                    alternarModo(); 
+                } else {
+                    // Login bem sucedido ou Cadastro com auto-login
+                    console.log("Sucesso!", result.data);
+                    window.location.href = 'index.html'; // Redireciona para o Painel
+                }
+
+            } catch (err) {
+                console.error(err);
+                let mensagem = err.message;
+                
+                // Traduzindo erros comuns do Supabase
+                if (mensagem.includes("Invalid login credentials")) mensagem = "E-mail ou senha incorretos.";
+                if (mensagem.includes("User already registered")) mensagem = "Este e-mail já está cadastrado.";
+                
+                msgErro.innerText = mensagem;
+                msgErro.style.display = 'block';
+            } finally {
+                btn.innerText = textoOriginal;
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

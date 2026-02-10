@@ -93,6 +93,36 @@
       }
     }
   },
+    },
+    "cndt-tst": {
+      "id": "tst",
+      "name": "Certidão negativa de débitos trabalhistas - Certidão CNPJ",
+      "enabled": true,
+      "api": {
+        "url": "https://api.infosimples.com/api/v2/consultas/tribunal/tst/cndt",
+        "timeout": 600
+      },
+      "requirements": {
+        "accepts": ["CNPJ", "CPF"],
+        "requiresName": false,
+        "requiresBirthdate": false,
+        "requiresMotherName": false
+      },
+      "parameters": {
+        "cnpj": "{{cnpj}}",
+        "cpf": "{{cpf}}",
+        "token": "{{token}}"
+      },
+      "fileProcessing": {
+        "supportedTypes": ["pdf"],
+        "customProcessor": null
+      },
+      "storage": {
+        "bucket": "arquivos-teste",
+        "pathTemplate": "{{user_id}}/{{batch_id}}/{{source}}_{{timestamp}}.{{extension}}"
+      }
+    }
+  },
   "global": {
     "defaultTimeout": 600,
     "maxRetries": 3,

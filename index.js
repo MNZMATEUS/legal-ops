@@ -87,6 +87,7 @@ app.post('/consultar-lote', async (req, res) => {
             if (resInfo.code !== 200) throw new Error(resInfo.code_message);
 
             let urlSupabase = null;
+            let linkOriginal = null;
 
             // --- LÓGICA DE ARQUIVOS ---
             if (resInfo.site_receipts && resInfo.site_receipts.length > 0) {
@@ -187,51 +188,23 @@ app.post('/consultar-lote', async (req, res) => {
                     }
                     // -----------------------------
 
-                    // Captura o link original (se existir) da InfoSimples
-                    const linkOriginal = resInfo.site_receipts && resInfo.site_receipts.length > 0 
-                        ? resInfo.site_receipts[0] 
-                        : null;
-        
-                    // Salva no Banco de Dados
-                    await supabase.from('certidoes_emitidas').insert([{
-                        batch_id: batchId,
-                        user_id: user_id,
-                        origem: fonteKey,
-                        documento_pesquisado: docLimpo,
-                        nome_pesquisado: nomeLimpo,
-                        resposta_completa_api: resInfo,
-                        
-                        url_arquivo: urlSupabase, // Agora isso terá o link correto do seu PDF
-                        url_origem: linkOriginal, // Link original da fonte
-                        
-                        status_resumido: 'SUCESSO'
-                    }]);
-                    
-                    
-                    // 4. RECUPERA A URL (Faltava isso no seu snippet!)
-                    if (!upErr) {
-                        const { data: urlData } = supabase.storage
-                            .from('arquivos-teste')
-                            .getPublicUrl(nomeArquivo);
-                        urlSupabase = urlData.publicUrl; // <--- Aqui preenchemos a variável
-                    } else {
-                        console.error('Erro Upload:', upErr);
-                    }
-
+                    // Captura o link original da InfoSimples
+                    linkOriginal = resInfo.site_receipts[0];
                 } catch (e) {
                     console.error(`[${fonteKey}] Erro no processamento do arquivo:`, e.message);
                 }
             }
 
-            // 5. Salva no Banco de Dados
+            // 5. Salva no Banco de Dados (apenas uma vez)
             await supabase.from('certidoes_emitidas').insert([{
                 batch_id: batchId,
-                user_id: user_id, // <--- Importante para o RLS
+                user_id: user_id,
                 origem: fonteKey,
                 documento_pesquisado: docLimpo,
                 nome_pesquisado: nomeLimpo,
                 resposta_completa_api: resInfo,
-                url_arquivo: urlSupabase, // Agora isso terá valor (ou null se falhou)
+                url_arquivo: urlSupabase, // URL do arquivo processado (ou null se não houver)
+                url_origem: linkOriginal, // Link original da fonte (ou null se não houver)
                 status_resumido: 'SUCESSO'
             }]);
 

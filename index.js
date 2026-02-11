@@ -167,7 +167,9 @@ app.post('/consultar-lote', async (req, res) => {
             console.log(`[${fonteKey}] Chamando API...`);
             // console.log(`[${fonteKey}] Params:`, JSON.stringify(args)); // Descomente para debug se precisar
             
-            const response = await axios.post(config.url, args);
+            const response = await axios.post(config.url, args, {
+                timeout: 25000
+            });
             const resInfo = response.data;
 
             if (resInfo.code !== 200) throw new Error(resInfo.code_message);
@@ -225,18 +227,33 @@ app.post('/consultar-lote', async (req, res) => {
             return { origem: fonteKey, status: 'SUCESSO', arquivo: urlSupabase };
 
         } catch (error) {
-            const errorMsg = error.response?.data?.code_message || error.message;
+    // 2. TRATAMENTO DE ERRO MELHORADO (IGNORAR E SEGUIR)
+    
+            let errorMsg = error.message;
+            
+            // Se for erro de timeout, avisamos
+            if (error.code === 'ECONNABORTED') {
+                errorMsg = "Tempo limite excedido (Fonte demorou muito)";
+                console.error(`[${fonteKey}] TIMEOUT: A fonte demorou demais e foi ignorada.`);
+            } else {
+                // Se for erro da API
+                errorMsg = error.response?.data?.code_message || error.message;
+                console.error(`[${fonteKey}] Erro API:`, errorMsg);
+            }
+        
+            // Salva o erro no banco para você ver que falhou, mas NÃO TRAVA o lote
             await supabase.from('certidoes_emitidas').insert([{
                 batch_id: batchId,
                 user_id: user_id,
                 origem: fonteKey,
                 documento_pesquisado: docLimpo,
                 status_resumido: 'ERRO',
-                resposta_completa_api: { erro: errorMsg, detalhes: error.response?.data }
+                resposta_completa_api: { erro: errorMsg }
             }]);
+            
+            // Retorna um objeto de erro "controlado" para o Promise.all não falhar
             return { origem: fonteKey, status: 'ERRO', mensagem: errorMsg };
         }
-    });
 
     const resultados = await Promise.all(promessas);
     res.json({ batch_id: batchId, status: 'ok', resultados });

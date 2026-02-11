@@ -63,17 +63,16 @@ const FONTES_CONFIG = {
 app.get('/', (req, res) => res.send('API Background Check v6 (Full Integration)'));
 
 app.post('/consultar-lote', async (req, res) => {
-    // 1. Recebendo TODOS os dados novos do Frontend
+    // 1. Recebendo TODOS os dados (incluindo rg_digito)
     const { 
         documento, nome, data_nascimento, nome_mae, 
-        rg, rg_digito, rg_expedicao, genero, 
+        rg, rg_digito, rg_expedicao, genero, // <--- Recebendo rg_digito
         email, endereco_cidade, endereco_uf,
         fontes_escolhidas, user_id 
     } = req.body;
     
     const batchId = uuidv4();
-
-    console.log(`>>> Batch ${batchId} | User: ${user_id} | Docs: ${documento}`);
+    console.log(`>>> Batch ${batchId} | User: ${user_id}`);
 
     if (!documento || !fontes_escolhidas) {
         return res.status(400).json({ erro: "Dados incompletos." });
@@ -87,88 +86,87 @@ app.post('/consultar-lote', async (req, res) => {
     const nomeMaeLimpo = nome_mae ? nome_mae.trim().toUpperCase() : null;
     const dataNascimentoLimpa = data_nascimento ? data_nascimento.trim() : null;
     
-    // Novos campos limpos
-    const rgLimpo = rg ? rg.replace(/\D/g, '') : null;
+    // Limpeza Específica para Antecedentes
+    const rgLimpo = rg ? rg.replace(/\D/g, '') : null; // Apenas números do RG principal
+    const rgDigitoLimpo = rg_digito ? rg_digito.trim().toUpperCase() : null; // Dígito (pode ser X)
     const emailLimpo = email ? email.trim() : null;
 
     const promessas = fontes_escolhidas.map(async (fonteKey) => {
         const config = FONTES_CONFIG[fonteKey];
         
-        // Verifica se a fonte existe e aceita o tipo de doc
         if (!config || !config.aceita.includes(tipoDoc)) {
-            // Caso especial: Antecedentes SP usa RG, mas validamos se é pessoa física (CPF)
             if (fonteKey === 'antecedentes_sp' && tipoDoc === 'CPF') {
-                // Passa, pois é PF
+                // Passa (é PF)
             } else {
                 return { origem: fonteKey, status: 'IGNORADO' };
             }
         }
         
-        // Validação Genérica de Nome
+        // Validação Genérica
         if (config.precisa_nome && !nomeLimpo) {
              return { origem: fonteKey, status: 'ERRO_DADOS', mensagem: 'Nome obrigatório' };
         }
 
-        // --- CONSTRUÇÃO DOS ARGUMENTOS DA API ---
         const args = { token: TOKEN_API, timeout: 600 };
         
-        // Parâmetros Padrão
+        // Parâmetros Padrão (CPF/CNPJ)
         if (tipoDoc === 'CNPJ') args.cnpj = docLimpo;
         if (tipoDoc === 'CPF') args.cpf = docLimpo;
 
-        // --- LÓGICA ESPECÍFICA POR FONTE ---
-        
-        // 1. Receita Federal (CPF)
+        // --- LÓGICA CORRIGIDA PARA ANTECEDENTES SP ---
+        if (fonteKey === 'antecedentes_sp') {
+            // Validação Rigorosa
+            if (!rgLimpo || !rg_expedicao || !genero) {
+                return { origem: fonteKey, status: 'ERRO_DADOS', mensagem: 'RG, Data Emissão ou Gênero faltando' };
+            }
+
+            // Montagem EXATA dos parâmetros solicitados:
+            args.nome = nomeLimpo;
+            args.birthdate = dataNascimentoLimpa; // Formato YYYY-MM-DD
+            args.genero = genero;                 // MASCULINO ou FEMININO
+            args.rg = rgLimpo;                    // Ex: "21274123"
+            args.rg_digito = rgDigitoLimpo;       // Ex: "2" ou "X"
+            args.rg_expedicao = rg_expedicao;     // Ex: "2010-03-05"
+            args.mae = nomeMaeLimpo;              // Ex: "Nome da Mãe" (A API pede 'mae', não 'nome_mae')
+
+            // Remove o CPF dos argumentos para esta busca específica se a API não pedir,
+            // mas geralmente a InfoSimples ignora campos extras. O importante são os de cima.
+        }
+        // ---------------------------------------------
+
+        // Outras Fontes (mantidas iguais)
         if (fonteKey === 'receita_cpf') {
             if (!dataNascimentoLimpa) return { origem: fonteKey, status: 'ERRO_DADOS', mensagem: 'Data Nascimento obrigatória' };
             args.birthdate = dataNascimentoLimpa;
         }
 
-        // 2. Polícia Federal
         if (fonteKey === 'policia_federal') {
             args.nome = nomeLimpo;
             args.birthdate = dataNascimentoLimpa;
             if (nomeMaeLimpo) args.nome_mae = nomeMaeLimpo;
         }
 
-        // 3. TRT4
         if (fonteKey === 'trt4' && tipoDoc === 'CPF') {
              args.nome = nomeLimpo; 
         }
 
-        // 4. Antecedentes Criminais SP (A mais complexa)
-        if (fonteKey === 'antecedentes_sp') {
-            if (!rgLimpo || !rg_expedicao || !genero) {
-                return { origem: fonteKey, status: 'ERRO_DADOS', mensagem: 'RG, Data Emissão ou Gênero faltando' };
-            }
-            args.nome = nomeLimpo;
-            args.birthdate = dataNascimentoLimpa;
-            args.rg = rgLimpo;
-            if (rg_digito) args.rg_digito = rg_digito;
-            args.rg_expedicao = rg_expedicao; // Formato YYYY-MM-DD vindo do front
-            args.genero = genero; // 'MASCULINO' ou 'FEMININO'
-            if (nomeMaeLimpo) args.mae = nomeMaeLimpo;
-            // args.pai = ... se tiver
-        }
-
-        // 5. TJSP Cível
         if (fonteKey === 'tjsp_civel') {
             if (!emailLimpo) return { origem: fonteKey, status: 'ERRO_DADOS', mensagem: 'Email obrigatório para TJSP' };
-            args.nome = nomeLimpo; // Se PJ, a API pede 'razao_social', mas 'nome' costuma funcionar como alias na InfoSimples, verifique doc
+            args.nome = nomeLimpo; 
             if (tipoDoc === 'CNPJ') args.razao_social = nomeLimpo;
-            
             args.email = emailLimpo;
-            args.finalidade = 'Conhecimento'; // Padrão
-            
+            args.finalidade = 'Conhecimento';
             if (tipoDoc === 'CNPJ') {
-                args.municipio = `${endereco_cidade} / ${endereco_uf}`; // Formato exigido costuma ser "CIDADE / UF"
+                args.municipio = `${endereco_cidade} / ${endereco_uf}`;
                 args.uf = endereco_uf;
                 args.pais = 'BRASIL';
             }
         }
 
         try {
-            console.log(`[${fonteKey}] Chamando InfoSimples...`);
+            console.log(`[${fonteKey}] Chamando API...`);
+            // console.log(`[${fonteKey}] Params:`, JSON.stringify(args)); // Descomente para debug se precisar
+            
             const response = await axios.post(config.url, args);
             const resInfo = response.data;
 
@@ -176,56 +174,42 @@ app.post('/consultar-lote', async (req, res) => {
 
             let urlSupabase = null;
 
-            // --- DOWNLOAD E UPLOAD DO PDF/HTML ---
+            // --- LÓGICA DE ARQUIVOS (PDF/HTML) ---
             if (resInfo.site_receipts && resInfo.site_receipts.length > 0) {
                 try {
                     const urlOriginal = resInfo.site_receipts[0];
                     const fileResponse = await axios.get(urlOriginal, { responseType: 'arraybuffer' });
                     let fileBuffer = fileResponse.data;
 
-                    // Detecção de Tipo
                     const headerArquivo = fileBuffer.toString('latin1', 0, 100).toLowerCase();
                     let extensao = headerArquivo.startsWith('%pdf') ? 'pdf' : 'html';
                     let contentType = extensao === 'pdf' ? 'application/pdf' : 'text/html; charset=latin1';
 
-                    // Tratamento Especial para HTML
                     if (extensao === 'html') {
                         let htmlContent = fileBuffer.toString('latin1');
-                        
-                        // Fix Imagem TRT4
                         if (fonteKey === 'trt4') {
                             htmlContent = htmlContent.replace(/src="assets\/imagens\/brasao.png"/g, 'src="https://pje.trt4.jus.br/certidoes/assets/imagens/brasao.png"');
                         }
-
-                        // Estilização (A4)
                         const estilo = `<style>body{font-family:'Times New Roman';padding:40px;background:#525659}article{max-width:800px;margin:0 auto;padding:50px;background:#fff;min-height:900px}img{display:block;margin:0 auto}</style>`;
                         htmlContent = estilo + htmlContent;
-                        
                         fileBuffer = Buffer.from(htmlContent, 'latin1');
                     }
 
-                    // Upload Supabase
                     const nomeArquivo = `${user_id}/${batchId}/${fonteKey}_${Date.now()}.${extensao}`;
                     const { error: upErr } = await supabase.storage
-                        .from('arquivos-teste') // <--- CHEQUE O NOME DO BUCKET
+                        .from('arquivos-teste')
                         .upload(nomeArquivo, fileBuffer, { contentType, upsert: true });
 
                     if (!upErr) {
-                        const { data: urlData } = supabase.storage
-                            .from('arquivos-teste')
-                            .getPublicUrl(nomeArquivo);
+                        const { data: urlData } = supabase.storage.from('arquivos-teste').getPublicUrl(nomeArquivo);
                         urlSupabase = urlData.publicUrl;
-                    } else {
-                        console.error(`[${fonteKey}] Erro Storage:`, upErr.message);
                     }
-
                 } catch (errFile) {
-                    console.error(`[${fonteKey}] Falha ao baixar/salvar arquivo:`, errFile.message);
-                    // Não damos throw aqui para salvar o resultado da consulta mesmo sem o PDF
+                    console.error(`[${fonteKey}] Falha arquivo:`, errFile.message);
                 }
             }
 
-            // --- SALVAR NO BANCO (ÚNICA VEZ) ---
+            // Salva Sucesso
             await supabase.from('certidoes_emitidas').insert([{
                 batch_id: batchId,
                 user_id: user_id,
@@ -242,19 +226,14 @@ app.post('/consultar-lote', async (req, res) => {
 
         } catch (error) {
             const errorMsg = error.response?.data?.code_message || error.message;
-            const errorFull = error.response?.data || { erro: errorMsg };
-            
-            console.error(`[${fonteKey}] Erro API:`, errorMsg);
-
             await supabase.from('certidoes_emitidas').insert([{
                 batch_id: batchId,
                 user_id: user_id,
                 origem: fonteKey,
                 documento_pesquisado: docLimpo,
                 status_resumido: 'ERRO',
-                resposta_completa_api: errorFull
+                resposta_completa_api: { erro: errorMsg, detalhes: error.response?.data }
             }]);
-            
             return { origem: fonteKey, status: 'ERRO', mensagem: errorMsg };
         }
     });
